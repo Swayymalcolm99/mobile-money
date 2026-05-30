@@ -8,6 +8,9 @@ import { enqueueSepWebhook } from "../services/stellar/webhooks";
 const router = Router();
 const transactionModel = new TransactionModel();
 
+// Rate-limit ingest traffic before signature verification and DB writes.
+router.use(ingestRateLimiter);
+
 interface RawBodyRequest extends Request {
   rawBody?: Buffer;
 }

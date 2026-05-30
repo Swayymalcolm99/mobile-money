@@ -1,13 +1,16 @@
 import dotenv from "dotenv";
+import fs from "fs";
 import path from "path";
 import fs from "fs";
 
 // Load .momorc from the cli/ directory, fall back to process.env
-dotenv.config({ path: path.resolve(__dirname, "..", ".momorc") });
+const MOMORC_PATH = path.resolve(__dirname, "..", ".momorc");
+dotenv.config({ path: MOMORC_PATH });
 
 export interface CliConfig {
   apiUrl: string;
   apiKey: string;
+  telemetry: boolean;
 }
 
 export interface Profile {
@@ -72,69 +75,49 @@ export function getConfig(): CliConfig {
   return {
     apiUrl: apiUrl ?? "http://localhost:3000",
     apiKey,
+    telemetry: getTelemetryEnabled(),
   };
 }
 
-export function saveProfile(
-  name: string,
-  apiUrl: string,
-  apiKey: string,
-): void {
-  const profiles = loadProfiles();
-  const index = profiles.profiles.findIndex((p) => p.name === name);
+/**
+ * Returns whether anonymous telemetry collection is enabled.
+ * Defaults to true if not explicitly set to "false".
+ */
+export function getTelemetryEnabled(): boolean {
+  return process.env.MOMO_TELEMETRY !== "false";
+}
 
-  if (index >= 0) {
-    profiles.profiles[index] = { name, apiUrl, apiKey };
+/**
+ * Persists the telemetry setting to the .momorc config file.
+ * Reads existing key=value lines and upserts MOMO_TELEMETRY.
+ */
+export function setTelemetryEnabled(enabled: boolean): void {
+  const value = enabled ? "true" : "false";
+
+  let lines: string[] = [];
+
+  // Read existing .momorc if it exists
+  if (fs.existsSync(MOMORC_PATH)) {
+    lines = fs.readFileSync(MOMORC_PATH, "utf-8").split("\n");
+  }
+
+  const key = "MOMO_TELEMETRY";
+  const entry = `${key}=${value}`;
+  const idx = lines.findIndex((l) => l.trimStart().startsWith(`${key}=`));
+
+  if (idx !== -1) {
+    lines[idx] = entry;
   } else {
-    profiles.profiles.push({ name, apiUrl, apiKey });
+    lines.push(entry);
   }
 
-  saveProfiles(profiles);
-}
+  const content =
+    lines
+      .filter((l, i) => l.trim() !== "" || i < lines.length - 1)
+      .join("\n")
+      .trimEnd() + "\n";
+  fs.writeFileSync(MOMORC_PATH, content, "utf-8");
 
-export function useProfile(name: string): Profile {
-  const profiles = loadProfiles();
-  const profile = profiles.profiles.find((p) => p.name === name);
-
-  if (!profile) {
-    throw new Error(`Profile "${name}" not found`);
-  }
-
-  profiles.activeProfile = name;
-  saveProfiles(profiles);
-  return profile;
-}
-
-export function deleteProfile(name: string): void {
-  const profiles = loadProfiles();
-  const index = profiles.profiles.findIndex((p) => p.name === name);
-
-  if (index < 0) {
-    throw new Error(`Profile "${name}" not found`);
-  }
-
-  profiles.profiles.splice(index, 1);
-
-  // If the deleted profile was active, clear the active profile
-  if (profiles.activeProfile === name) {
-    delete profiles.activeProfile;
-  }
-
-  saveProfiles(profiles);
-}
-
-export function listProfiles(): { profiles: Profile[]; activeProfile?: string } {
-  const profiles = loadProfiles();
-  return {
-    profiles: profiles.profiles,
-    activeProfile: profiles.activeProfile,
-  };
-}
-
-export function getActiveProfile(): Profile | undefined {
-  const profiles = loadProfiles();
-  if (profiles.activeProfile) {
-    return profiles.profiles.find((p) => p.name === profiles.activeProfile);
-  }
-  return undefined;
+  // Keep the current process in sync without a restart
+  process.env[key] = value;
 }
